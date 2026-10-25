@@ -53,7 +53,7 @@
 <canvas id="stage" tabindex="0" role="img" aria-label="Loke's noob character in a 3D playground. WASD to move, Space to jump, drag to look, scroll to zoom."></canvas>
 <header>
   <h1>Loke's Noob</h1>
-  <p id="hint">WASD or arrows to move · Space to jump · 1-0 to dance · ` to clone yourself · drag to look · scroll to zoom · M for mic · VR: left stick move, right stick turn, A jump, Grip grabs the camera</p>
+  <p id="hint">WASD or arrows to move · Space to jump · 1-0 to dance · ` to clone yourself · drag to look · scroll to zoom · M for mic · VR: left stick move, right stick turn, A jump, Grip grabs the camera, laser + trigger presses its buttons</p>
 </header>
 <div class="bar">
   <button id="reset" type="button">Reset view</button>
@@ -1009,9 +1009,14 @@ renderer.xr.setReferenceSpaceType('local-floor');
       return m;
     }
     var info = label(0.46, 0.04, 460, 40, 'bold 24px sans-serif'); info.position.set(0, 0.18, 0.033); cam.add(info);
+    var hitMeshes = [], hitMat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+    var laserGeo = new THREE.CylinderGeometry(0.004, 0.004, 1, 6, 1, true); laserGeo.rotateX(Math.PI / 2); laserGeo.translate(0, 0, -0.5);
+    var lrO = V(), lrD = V(), lrQ = new THREE.Quaternion(), lrc = new THREE.Raycaster();
     var buttons = [['photo', 'PHOTO'], ['rec', 'REC'], ['mode', 'MODE'], ['flip', 'FLIP'], ['fovm', 'FOV-'], ['fovp', 'FOV+']].map(function (d, i) {
       var bt = label(0.065, 0.05, 130, 100, 'bold 30px sans-serif'); bt.position.set((i - 2.5) * 0.075, -0.15, 0.035);
-      bt.userData = { id: d[0], txt: d[1], t: 0, k: '' }; cam.add(bt); return bt;
+      bt.userData = { id: d[0], txt: d[1], t: 0, k: '', i: i }; cam.add(bt);
+      var hm = new THREE.Mesh(new THREE.PlaneGeometry(0.072, 0.085), hitMat); hm.position.z = 0.002; hm.visible = false; hm.userData = { i: i }; bt.add(hm); hitMeshes.push(hm);
+      return bt;
     });
     function ui() {
       buttons.forEach(function (bt) {
@@ -1026,11 +1031,17 @@ renderer.xr.setReferenceSpaceType('local-floor');
       var grip = renderer.xr.getControllerGrip(i);
       var ball = new THREE.Mesh(new THREE.SphereGeometry(HAND_R, 20, 14), new THREE.MeshBasicMaterial({ color: i ? 0xff5a5a : 0x4c7dff }));
       grip.add(ball); rig.add(grip);
-      var h = { ctrl: c, grip: grip, hold: null, off: new THREE.Matrix4(), latch: -1 };
+      var las = new THREE.Mesh(laserGeo, new THREE.MeshBasicMaterial({ color: 0xffffff })); las.visible = false; c.add(las);
+      var h = { ctrl: c, grip: grip, hold: null, off: new THREE.Matrix4(), latch: -1, aim: -1, sel: false, laser: las };
       c.addEventListener('connected', function (e) { ball.material.color.set(e.data.handedness === 'left' ? 0x4c7dff : 0xff5a5a); });
       c.addEventListener('squeezestart', function () { grab(h); });
       c.addEventListener('squeezeend', function () { release(h); });
-      c.addEventListener('selectstart', function () { if (h.hold) photo(); });
+      c.addEventListener('selectstart', function () {
+        h.sel = true;
+        if (h.aim >= 0) { var bid = buttons[h.aim].userData.id; if (bid !== 'fovm' && bid !== 'fovp') { press(bid); buzz(h, 0.5, 40); } }
+        else if (h.hold) photo();
+      });
+      c.addEventListener('selectend', function () { h.sel = false; });
       return h;
     });
     function buzz(h, amp, ms) {
@@ -1135,7 +1146,7 @@ renderer.xr.setReferenceSpaceType('local-floor');
     }
 
     return {
-      setActive: function (on) { cam.visible = on; if (!on && st.rec) toggleRec(); },
+      setActive: function (on) { cam.visible = on; if (!on) hands.forEach(function (h) { h.laser.visible = false; }); if (!on && st.rec) toggleRec(); },
       update: function () {
         var now = performance.now(), dt = Math.min((now - lastT) / 1000, 0.05), sc = vr.scale; lastT = now;
         if (!placed && vr.calib) place();
@@ -1144,6 +1155,19 @@ renderer.xr.setReferenceSpaceType('local-floor');
         homePrev = home;
         updateCam();
         if (gr && hands.some(function (h) { return h.hold; }) && gr.axes.length >= 4 && Math.abs(gr.axes[3]) > 0.2) st.fov += gr.axes[3] * 40 * dt;
+        hands.forEach(function (h) {
+          var show = !!(h.ctrl.userData.src && !h.hold);
+          h.laser.visible = show; h.aim = -1;
+          if (!show) return;
+          h.ctrl.getWorldPosition(lrO); h.ctrl.getWorldQuaternion(lrQ); lrD.set(0, 0, -1).applyQuaternion(lrQ);
+          lrc.set(lrO, lrD); lrc.far = 8 * sc;
+          var hit = lrc.intersectObjects(hitMeshes, false)[0], len = 5;
+          if (hit) {
+            h.aim = hit.object.userData.i; len = hit.distance / sc; buttons[h.aim].userData.t = 0.12;
+            if (h.sel) { var fid = buttons[h.aim].userData.id; if (fid === 'fovm') st.fov -= 40 * dt; else if (fid === 'fovp') st.fov += 40 * dt; }
+          }
+          h.laser.scale.z = hit ? len : 5 / sc * 2; h.laser.material.color.set(hit ? 0xffe14d : 0xffffff);
+        });
         hands.forEach(function (h) {
           if (!h.grip.visible) return;
           h.grip.getWorldPosition(a);
