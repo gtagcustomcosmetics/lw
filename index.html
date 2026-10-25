@@ -61,6 +61,7 @@
   <button id="mic" type="button" aria-pressed="false" title="Mouth follows your mic (M)">Mic</button>
   <label id="sensWrap">Mic level <input id="sens" type="range" min="1" max="10" step="0.5" value="5"></label>
   <button id="rec" type="button" aria-pressed="false" title="Record video (R)">Record</button>
+  <button id="exp" type="button" title="Download the avatar with its rig as a .glb">Export avatar</button>
   <button id="vr" type="button">Enter VR</button>
 </div>
 <div id="caps" hidden><b>Captures</b><div id="capList"></div></div>
@@ -68,6 +69,7 @@
 <div id="fallback">Your browser could not start 3D graphics (WebGL). Try a different browser or device.</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/GLTFExporter.js"></script>
 <script>
 (function () {
   var canvas = document.getElementById('stage');
@@ -174,7 +176,7 @@ renderer.xr.setReferenceSpaceType('local-floor');
     if (def.uv) geo.setAttribute('uv', new THREE.BufferAttribute(decode(def.uv, Float32Array), 2));
     var all = [], mats = [], start = 0;
     def.prims.forEach(function (p, k) {
-      var ix = decode(p.idx, Uint16Array);
+      var ix = p.idxArr || decode(p.idx, Uint16Array);
       for (var i = 0; i < ix.length; i++) all.push(ix[i]);
       geo.addGroup(start, ix.length, k);
       start += ix.length;
@@ -206,20 +208,49 @@ renderer.xr.setReferenceSpaceType('local-floor');
 
   // The model is in a T-pose, so each limb gets a pivot at its joint plus a fixed "hang" rotation
   // limb(def, where the joint sits on the body, where the joint is in the model file, hang angle)
-  var armR = limb(MODEL.parts.armR, [2.52, 0.90, 0], [1.57, 0, 0], -Math.PI / 2);
-  var armL = limb(MODEL.parts.armL, [-2.16, 0.90, 0], [-1.36, 0, 0], Math.PI / 2);
+  var armR = limb(MODEL.parts.armR, [2.52, 0.90, 0], [1.57, 0, 0], -Math.PI / 2, { xc: 3.535, bs: -1 });
+  var armL = limb(MODEL.parts.armL, [-2.16, 0.90, 0], [-1.36, 0, 0], Math.PI / 2, { xc: -3.32, bs: 1 });
   var legL = limb(MODEL.parts.legA, [-0.775, -2.75, 0], [-0.775, -2.75, 0], 0);
   var legR = limb(MODEL.parts.legB, [1.155, -2.75, 0], [1.155, -2.75, 0], 0);
 
-  function limb(def, world, meshJoint, hang) {
+  // cut an arm mesh at the elbow; triangles that straddle the cut go in both halves so the joint stays closed when it bends
+  function splitArm(def, xc, sg) {
+    var pos = decode(def.pos, Float32Array), up = { pos: def.pos, uv: def.uv, prims: [] }, lo = { pos: def.pos, uv: def.uv, prims: [] }, tip = 0, i;
+    for (i = 0; i < pos.length; i += 3) if (Math.abs(pos[i]) > Math.abs(tip)) tip = pos[i];
+    def.prims.forEach(function (p) {
+      var ix = decode(p.idx, Uint16Array), A = [], B = [];
+      for (var t = 0; t < ix.length; t += 3) {
+        var x0 = pos[ix[t] * 3], x1 = pos[ix[t + 1] * 3], x2 = pos[ix[t + 2] * 3], mid = (x0 + x1 + x2) / 3;
+        var hand = sg > 0 ? mid > xc : mid < xc, cut = Math.min(x0, x1, x2) < xc && Math.max(x0, x1, x2) > xc;
+        if (!hand || cut) A.push(ix[t], ix[t + 1], ix[t + 2]);
+        if (hand || cut) B.push(ix[t], ix[t + 1], ix[t + 2]);
+      }
+      up.prims.push({ tex: p.tex, color: p.color, idxArr: new Uint16Array(A) });
+      lo.prims.push({ tex: p.tex, color: p.color, idxArr: new Uint16Array(B) });
+    });
+    return { up: up, lo: lo, tip: tip };
+  }
+  function limb(def, world, meshJoint, hang, elbow) {
     var piv = new THREE.Group();
     piv.position.set(world[0], world[1], world[2]);
     var h = new THREE.Group();
     h.rotation.z = hang;
     piv.add(h);
-    addPart(h, def, new THREE.Vector3(-meshJoint[0], -meshJoint[1], -meshJoint[2]));
+    var off = new THREE.Vector3(-meshJoint[0], -meshJoint[1], -meshJoint[2]);
+    if (elbow) {
+      var sp = splitArm(def, elbow.xc, meshJoint[0] < 0 ? -1 : 1);
+      addPart(h, sp.up, off);
+      var el = new THREE.Group(); el.position.set(elbow.xc - meshJoint[0], 0, 0); h.add(el);
+      addPart(el, sp.lo, new THREE.Vector3(-elbow.xc, 0, 0));
+      piv.userData = { el: el, bs: elbow.bs, Lu: Math.abs(elbow.xc - meshJoint[0]), Ll: Math.abs(sp.tip - elbow.xc) };
+    } else addPart(h, def, off);
     model.add(piv);
     return piv;
+  }
+  // relaxed default bend: a little at rest, more when the arm swings forward, less overhead
+  function setElbow(arm, ax) {
+    var f = Math.max(0, Math.min(3.14, -ax));
+    arm.userData.el.rotation.y = arm.userData.bs * (0.1 + 0.6 * Math.sin(f));
   }
 
   scene.add(noob);
@@ -875,12 +906,29 @@ renderer.xr.setReferenceSpaceType('local-floor');
     rig.scale.setScalar(vr.scale);
   }
 
+  var ikU = new THREE.Vector3(), ikP = new THREE.Vector3(), ikE = new THREE.Vector3(), ikX = new THREE.Vector3(), ikY = new THREE.Vector3(), ikZ = new THREE.Vector3();
+  var ikM = new THREE.Matrix4(), ikQ = new THREE.Quaternion(), Y180 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
   function aimArm(arm, c) {
-    if (!c) return;
+    if (!c || !arm.userData.el) return;
     vv.setFromMatrixPosition(c.matrix); rig.localToWorld(vv); model.worldToLocal(vv);
     vv.sub(arm.position);
-    if (vv.lengthSq() < 1e-4) return;
-    arm.quaternion.setFromUnitVectors(DOWN, vv.normalize());
+    var d = vv.length(), Lu = arm.userData.Lu, Ll = arm.userData.Ll;
+    if (d < 1e-3) return;
+    var dc = clamp(d, 0.3, (Lu + Ll) * 0.999);
+    var A = Math.acos(clamp((Lu * Lu + dc * dc - Ll * Ll) / (2 * Lu * dc), -1, 1));
+    var bend = Math.PI - Math.acos(clamp((Lu * Lu + Ll * Ll - dc * dc) / (2 * Lu * Ll), -1, 1));
+    ikU.copy(vv).multiplyScalar(1 / d);
+    ikP.set(arm.position.x > 0 ? 0.4 : -0.4, -1, -0.45);        // elbow points out, down and back
+    ikP.addScaledVector(ikU, -ikP.dot(ikU));
+    if (ikP.lengthSq() < 1e-4) ikP.set(0, 0, -1);
+    ikP.normalize();
+    ikE.copy(ikU).multiplyScalar(Math.cos(A)).addScaledVector(ikP, Math.sin(A));   // upper arm direction
+    ikY.copy(ikE).negate();
+    ikZ.copy(ikP).negate(); ikZ.addScaledVector(ikE, -ikZ.dot(ikE));
+    if (ikZ.lengthSq() < 1e-6) return;
+    ikZ.normalize(); ikX.crossVectors(ikY, ikZ);
+    ikM.makeBasis(ikX, ikY, ikZ); arm.quaternion.setFromRotationMatrix(ikM);
+    arm.userData.el.rotation.y = arm.userData.bs * bend;
   }
 
   // after the noob has been posed: put your head on his, hide it, point his arms at your hands
@@ -891,6 +939,8 @@ renderer.xr.setReferenceSpaceType('local-floor');
     rig.position.set(P.x - vA.x, P.y, P.z - vA.z);
     rig.updateMatrixWorld(true);
     vr.headW.copy(vr.head); rig.localToWorld(vr.headW); vr.headQ.copy(rig.quaternion).multiply(vq);
+    model.getWorldQuaternion(ikQ).invert();
+    headG.quaternion.copy(ikQ).multiply(vr.headQ).multiply(Y180);
     armR.getWorldPosition(vA); armL.getWorldPosition(vB);
     var rightArm = ((vA.x - vB.x) * -vr.fz + (vA.z - vB.z) * vr.fx) > 0 ? armR : armL;
     var leftArm = rightArm === armR ? armL : armR;
@@ -1116,6 +1166,42 @@ renderer.xr.setReferenceSpaceType('local-floor');
     };
   })();
 
+  // ---------- Export avatar (.glb, rest pose, named rig nodes, no outlines) ----------
+  async function saveBlobFile(blob, name) {
+    var dl = null;
+    try { dl = window.claude && claude.use ? await claude.use('downloads') : null; } catch (err) { dl = null; }
+    if (dl) {
+      try { await dl.save({ filename: name, data: blob }); toast('Saved ' + name, 2500); }
+      catch (err) { toast(err && err.code === 'declined' ? 'Save cancelled' : 'Could not save'); }
+      return;
+    }
+    var an = document.createElement('a'); an.href = URL.createObjectURL(blob); an.download = name;
+    document.body.appendChild(an); an.click(); an.remove();
+    setTimeout(function () { URL.revokeObjectURL(an.href); }, 10000); toast('Saved ' + name, 2500);
+  }
+  function exportAvatar() {
+    if (!THREE.GLTFExporter) { toast('Exporter did not load (needs internet)', 3000); return; }
+    noob.name = 'LokesNoob'; model.name = 'model'; torsoG.name = 'torso'; headG.name = 'head'; hairG.name = 'hair';
+    armL.name = 'armL'; armR.name = 'armR'; legL.name = 'legL'; legR.name = 'legR';
+    armL.userData.el.name = 'elbowL'; armR.userData.el.name = 'elbowR';
+    var c = noob.clone(true), kill = [];
+    c.traverse(function (o) { if (o.isMesh && o.material === outlineMat) kill.push(o); });
+    kill.forEach(function (o) { o.parent.remove(o); });
+    c.position.set(0, 0, 0); c.rotation.set(0, 0, 0); c.scale.set(1, 1, 1);
+    c.traverse(function (o) {
+      o.visible = true;
+      if (o.name === 'armL' || o.name === 'armR') { o.rotation.set(0, 0, 0); o.position.y = 0.9; }
+      if (o.name === 'legL' || o.name === 'legR' || o.name === 'elbowL' || o.name === 'elbowR') o.rotation.set(0, 0, 0);
+      if (o.name === 'head') { o.rotation.set(0, 0, 0); o.position.y = NECK.y; }
+      if (o.name === 'torso') o.scale.set(1, 1, 1);
+      if (o.isMesh) { var pr = o.parent; while (pr && !pr.name) pr = pr.parent; o.name = (pr ? pr.name : 'part') + '_mesh'; }
+    });
+    new THREE.GLTFExporter().parse(c, function (buf) {
+      saveBlobFile(new Blob([buf], { type: 'model/gltf-binary' }), 'lokes-noob.glb');
+    }, { binary: true, onlyVisible: false });
+  }
+  $('exp').addEventListener('click', function () { exportAvatar(); canvas.focus(); });
+
   // ---------- Frame update ----------
   function update(dt) {
     faceTick(dt);
@@ -1189,6 +1275,7 @@ renderer.xr.setReferenceSpaceType('local-floor');
     for (var key in pose) pose[key] += (tp[key] - pose[key]) * k;
     armL.rotation.set(pose.aLx, 0, pose.aLz - 0.14);
     armR.rotation.set(pose.aRx, 0, pose.aRz + 0.14);
+    setElbow(armL, pose.aLx); setElbow(armR, pose.aRx);
     legL.rotation.set(pose.lLx, 0, pose.lLz);
     legR.rotation.set(pose.lRx, 0, pose.lRz);
 
