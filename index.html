@@ -933,7 +933,7 @@ renderer.xr.setReferenceSpaceType('local-floor');
 
   // after the noob has been posed: put your head on his, hide it, point his arms at your hands
   function vrPost() {
-    headG.visible = false;
+    headG.visible = false; torsoG.visible = false; legL.visible = false; legR.visible = false;   // headset sees only the arms
     noob.updateMatrixWorld(true);
     vA.set(vr.head.x * vr.scale, 0, vr.head.z * vr.scale).applyQuaternion(rig.quaternion);
     rig.position.set(P.x - vA.x, P.y, P.z - vA.z);
@@ -968,7 +968,7 @@ renderer.xr.setReferenceSpaceType('local-floor');
     danceId = 0; vrBtn.textContent = 'Exit VR'; camRig.setActive(true);
   });
   renderer.xr.addEventListener('sessionend', function () {
-    vr.active = false; RUN = 12; scene.add(camera); headG.visible = true;
+    vr.active = false; RUN = 12; scene.add(camera); headG.visible = true; torsoG.visible = legL.visible = legR.visible = true;
     rig.rotation.set(0, 0, 0); rig.scale.setScalar(1); camRig.setActive(false); vrBtn.textContent = 'Enter VR'; fit();
   });
 
@@ -1084,9 +1084,10 @@ renderer.xr.setReferenceSpaceType('local-floor');
         if (st.mode === 2) c2.quaternion.multiply(qFlip);
       }
       c2.fov = st.fov; c2.updateProjectionMatrix();
-      cam.visible = false; headG.visible = st.mode !== 1;       // you see his head from outside, not from inside
+      cam.visible = false; headG.visible = st.mode !== 1;       // the camera sees the whole noob (head hidden only in FIRST, since it sits inside it)
+      torsoG.visible = legL.visible = legR.visible = true;
       r2.render(scene, c2);
-      cam.visible = true; headG.visible = false; tex.needsUpdate = true;
+      cam.visible = true; headG.visible = false; torsoG.visible = legL.visible = legR.visible = false; tex.needsUpdate = true;
     }
 
     async function saveFile(blob, name) {
