@@ -974,7 +974,7 @@ renderer.xr.setReferenceSpaceType('local-floor');
     }
   }
   async function startMic() {
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     await audioCtx.resume();
     sampleRate = audioCtx.sampleRate;
@@ -1044,7 +1044,11 @@ renderer.xr.setReferenceSpaceType('local-floor');
   function vrPre() {
     var gl = padOf('left'), gr = padOf('right');
     vr.mx = vr.mz = 0;
-    if (gl && gl.axes.length >= 4 && Math.hypot(gl.axes[2], gl.axes[3]) > 0.2) { vr.mx = gl.axes[2]; vr.mz = -gl.axes[3]; }
+    if (gl && gl.axes.length >= 4) {
+      var ax = gl.axes[2], ay = -gl.axes[3], dead = 0.35; // stronger dead zone prevents controller drift from walking the player
+      var mag = Math.hypot(ax, ay);
+      if (mag > dead) { var scaled = Math.min(1, (mag - dead) / (1 - dead)); vr.mx = ax / mag * scaled; vr.mz = ay / mag * scaled; }
+    }
     if (gr && gr.axes.length >= 4) {
       var tx = gr.axes[2];
       if (Math.abs(tx) > 0.7) { if (!vr.turnLatch) { rig.rotation.y -= Math.sign(tx) * SNAP; vr.turnLatch = true; } }
@@ -1060,11 +1064,10 @@ renderer.xr.setReferenceSpaceType('local-floor');
     // headset pose in rig space (r128 keeps it on the XR camera's matrix)
     var xc = renderer.xr.getCamera(camera), vc = (xc.cameras && xc.cameras[0]) || xc;
     vr.head.setFromMatrixPosition(vc.matrix);
-    // Capture a neutral headset position once per VR session. Leaning forward from
-    // this point provides gentle continuous movement without requiring the stick.
+    // Keep a stable headset baseline for camera-height compensation only.
+    // Head movement must never move the player forward; locomotion is stick-only.
     if (!vr.headBaseSet) { vr.headBase.copy(vr.head); vr.headBaseSet = true; }
-    var forwardLean = vr.headBase.z - vr.head.z;
-    vr.leanMove = clamp((forwardLean - 0.10) / 0.28, 0, 1);
+    vr.leanMove = 0;
     vq.setFromRotationMatrix(vc.matrix);
     vv.set(0, 0, -1).applyQuaternion(vq).applyQuaternion(rig.quaternion);
     var fl = Math.hypot(vv.x, vv.z);
@@ -1159,7 +1162,7 @@ renderer.xr.setReferenceSpaceType('local-floor');
     var tex = new THREE.CanvasTexture(cv2); tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false; tex.encoding = THREE.sRGBEncoding;
     var V = function (x, y, z) { return new THREE.Vector3(x || 0, y || 0, z || 0); };
     var M = new THREE.Matrix4(), tS = V(), a = V(), b = V(), x = V(), y = V(), z = V(), u1 = V(), u2 = V(), q = new THREE.Quaternion();
-    var placed = false, flash = 0, n = 0, mr = null, chunks = [], lastT = performance.now(), lastCam = 0, infoKey = '', homePrev = false;
+    var placed = false, flash = 0, n = 0, mr = null, chunks = [], lastT = performance.now(), lastCam = 0, infoKey = '', homePrev = false, recordLockY = null;
 
     var cam = new THREE.Group(); cam.visible = false; scene.add(cam);
     var dark = new THREE.MeshStandardMaterial({ color: 0x22262e, roughness: 0.5 });
@@ -1185,8 +1188,8 @@ renderer.xr.setReferenceSpaceType('local-floor');
     var hitMeshes = [], hitMat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
     var laserGeo = new THREE.CylinderGeometry(0.004, 0.004, 1, 6, 1, true); laserGeo.rotateX(Math.PI / 2); laserGeo.translate(0, 0, -0.5);
     var lrO = V(), lrD = V(), lrQ = new THREE.Quaternion(), lrc = new THREE.Raycaster();
-    var buttons = [['photo', 'PHOTO'], ['rec', 'REC'], ['mode', 'MODE'], ['flip', 'FLIP'], ['fovm', 'FOV-'], ['fovp', 'FOV+']].map(function (d, i) {
-      var bt = label(0.065, 0.05, 130, 100, 'bold 30px sans-serif'); bt.position.set((i - 2.5) * 0.075, -0.15, 0.035);
+    var buttons = [['photo', 'PHOTO'], ['rec', 'REC'], ['mode', 'MODE'], ['flip', 'FLIP'], ['aspect', 'ASPECT'], ['fovm', 'FOV-'], ['fovp', 'FOV+']].map(function (d, i) {
+      var bt = label(0.058, 0.05, 130, 100, 'bold 27px sans-serif'); bt.position.set((i - 3) * 0.062, -0.15, 0.035);
       bt.userData = { id: d[0], txt: d[1], t: 0, k: '', i: i }; cam.add(bt);
       var hm = new THREE.Mesh(new THREE.PlaneGeometry(0.072, 0.085), hitMat); hm.position.z = 0.002; hm.visible = false; hm.userData = { i: i }; bt.add(hm); hitMeshes.push(hm);
       return bt;
@@ -1196,7 +1199,7 @@ renderer.xr.setReferenceSpaceType('local-floor');
         var u = bt.userData, on = u.t > 0 || (u.id === 'rec' && st.rec) || (u.id === 'flip' && st.mirror), txt = u.id === 'rec' && st.rec ? 'STOP' : u.txt, k = txt + on;
         if (k !== u.k) { u.k = k; bt.draw(txt, on ? (u.id === 'rec' ? '#d11a2a' : '#2a9df4') : '#2a3140', '#fff'); }
       });
-      var t = MODES[st.mode] + '   FOV ' + Math.round(st.fov) + '°' + (st.rec ? '   ● REC' : '');
+      var t = MODES[st.mode] + '   ' + (aspectMode === 'portrait' ? '9:16' : '16:9') + '   FOV ' + Math.round(st.fov) + '°' + (st.rec ? '   ● REC' : '');
       if (t !== infoKey) { infoKey = t; info.draw(t, '#10131a', '#9ee7ff'); }
     }
 
@@ -1246,7 +1249,7 @@ renderer.xr.setReferenceSpaceType('local-floor');
     }
     function updateCam() {
       var hs = hands.filter(function (h) { return h.hold; });
-      if (hs.length === 1) { M.multiplyMatrices(hs[0].grip.matrixWorld, hs[0].off); M.decompose(cam.position, cam.quaternion, tS); }
+      if (hs.length === 1) { M.multiplyMatrices(hs[0].grip.matrixWorld, hs[0].off); M.decompose(cam.position, cam.quaternion, tS); cam.position.y += (vr.headBase.y - vr.head.y) * vr.scale; }
       else if (hs.length === 2) {
         var R = hs.find(function (h) { return h.hold.side > 0; }), L = hs.find(function (h) { return h.hold.side < 0; });
         R.grip.getWorldPosition(a); L.grip.getWorldPosition(b);
@@ -1254,20 +1257,24 @@ renderer.xr.setReferenceSpaceType('local-floor');
         u1.set(0, 1, 0).applyQuaternion(R.grip.getWorldQuaternion(q)); u2.set(0, 1, 0).applyQuaternion(L.grip.getWorldQuaternion(q));
         y.set(0, 2, 0).add(u1).add(u2);
         z.crossVectors(x, y).normalize(); y.crossVectors(z, x);
-        M.makeBasis(x, y, z); cam.quaternion.setFromRotationMatrix(M); cam.position.addVectors(a, b).multiplyScalar(0.5);
+        M.makeBasis(x, y, z); cam.quaternion.setFromRotationMatrix(M); cam.position.addVectors(a, b).multiplyScalar(0.5); cam.position.y += (vr.headBase.y - vr.head.y) * vr.scale;
       }
       cam.scale.setScalar(vr.scale);
       cam.updateMatrixWorld(true);
     }
 
     var c2 = new THREE.PerspectiveCamera(70, 16 / 9, 0.1, 1500), qFlip = new THREE.Quaternion().setFromAxisAngle(V(0, 1, 0), Math.PI);
+    c2.layers.enable(1); // recording camera sees the full rig while the headset camera stays arms-only
+    var aspectMode = 'landscape';
     function renderCam() {
       if (st.mode === 1) { c2.position.copy(vr.headW); c2.quaternion.copy(vr.headQ); }
       else {
         c2.position.copy(cam.localToWorld(a.set(0, 0.03, st.mode === 2 ? 0.04 : -0.04))); c2.quaternion.copy(cam.quaternion);
         if (st.mode === 2) c2.quaternion.multiply(qFlip);
       }
-      c2.fov = st.fov; c2.updateProjectionMatrix();
+      if (recordLockY === null) recordLockY = c2.position.y;
+      c2.position.y = recordLockY; // recording view stays at one height even when the player stands or crouches
+      c2.aspect = aspectMode === 'portrait' ? 9 / 16 : 16 / 9; c2.fov = st.fov; c2.updateProjectionMatrix();
       cam.visible = false; headG.visible = st.mode !== 1;       // the camera sees the whole noob (head hidden only in FIRST, since it sits inside it)
       torsoG.visible = legL.visible = legR.visible = true;
       r2.render(scene, c2);
@@ -1298,16 +1305,23 @@ renderer.xr.setReferenceSpaceType('local-floor');
       renderCam(); flash = 0.18;
       cv2.toBlob(function (bl) { if (bl) addCapture(bl, 'noob-photo-' + (++n) + '.jpg', false); }, 'image/jpeg', 0.92);
     }
-    function toggleRec() {
+    async function toggleRec() {
       if (!st.rec) {
+        if (!micOn) {
+          try { await startMic(); micOn = true; micBtn.setAttribute('aria-pressed', 'true'); sensWrap.style.display = 'flex'; }
+          catch (err) { toast('Allow microphone access to record voice (' + ((err && err.name) || 'blocked') + ')', 3500); return; }
+        }
         var mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'].find(function (mt) { return window.MediaRecorder && MediaRecorder.isTypeSupported(mt); });
         if (!mime) return;
         chunks = [];
-        mr = new MediaRecorder(cv2.captureStream(30), { mimeType: mime, videoBitsPerSecond: 5e6 });
+        var recordStream = cv2.captureStream(30);
+        if (micStream) micStream.getAudioTracks().forEach(function (track) { recordStream.addTrack(track); });
+        mr = new MediaRecorder(recordStream, { mimeType: mime, videoBitsPerSecond: 5e6 });
         mr.ondataavailable = function (e) { if (e.data.size) chunks.push(e.data); };
         mr.onstop = function () {
           var ty = mime.split(';')[0];
           addCapture(new Blob(chunks, { type: ty }), 'noob-clip-' + (++n) + '.' + (ty.indexOf('mp4') >= 0 ? 'mp4' : 'webm'), true);
+          recordStream.getTracks().forEach(function (track) { if (track.kind === 'video') track.stop(); });
         };
         mr.start(1000); st.rec = true;
       } else { mr.stop(); st.rec = false; }
@@ -1315,11 +1329,18 @@ renderer.xr.setReferenceSpaceType('local-floor');
     function press(id) {
       if (id === 'photo') photo(); else if (id === 'rec') toggleRec();
       else if (id === 'mode') st.mode = (st.mode + 1) % 3;
-      else if (id === 'flip') { st.mirror = !st.mirror; screen.scale.x = st.mirror ? -1 : 1; }
+      else if (id === 'flip') { st.mirror = !st.mirror; screen.scale.x = (st.mirror ? -1 : 1) * (aspectMode === 'portrait' ? 0.5625 : 1); }
+      else if (id === 'aspect') {
+        aspectMode = aspectMode === 'landscape' ? 'portrait' : 'landscape';
+        var w = aspectMode === 'portrait' ? 450 : 800, h = aspectMode === 'portrait' ? 800 : 450;
+        r2.setSize(w, h, false); c2.aspect = w / h; c2.updateProjectionMatrix();
+        screen.scale.x = (st.mirror ? -1 : 1) * (aspectMode === 'portrait' ? 0.5625 : 1);
+        flashM.scale.x = aspectMode === 'portrait' ? 0.5625 : 1;
+      }
     }
 
     return {
-      setActive: function (on) { cam.visible = on; if (!on) hands.forEach(function (h) { h.laser.visible = false; }); if (!on && st.rec) toggleRec(); },
+      setActive: function (on) { cam.visible = on; if (on) recordLockY = null; if (!on) { recordLockY = null; hands.forEach(function (h) { h.laser.visible = false; }); } if (!on && st.rec) toggleRec(); },
       update: function () {
         var now = performance.now(), dt = Math.min((now - lastT) / 1000, 0.05), sc = vr.scale; lastT = now;
         if (!placed && vr.calib) place();
@@ -1411,7 +1432,7 @@ renderer.xr.setReferenceSpaceType('local-floor');
 
     // WASD relative to the camera
     var mx = ((keys.KeyD || keys.ArrowRight) ? 1 : 0) - ((keys.KeyA || keys.ArrowLeft) ? 1 : 0), mz = ((keys.KeyW || keys.ArrowUp) ? 1 : 0) - ((keys.KeyS || keys.ArrowDown) ? 1 : 0);
-    if (vr.active) { mx = vr.mx; mz = Math.max(vr.mz, vr.leanMove); }
+    if (vr.active) { mx = vr.mx; mz = vr.mz; }
     var fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
     var dx = fx * mz + rx * mx, dz = fz * mz + rz * mx, len = Math.hypot(dx, dz), hasIn = len > 0.01;
     if (hasIn) { dx /= len; dz /= len; }
