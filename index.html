@@ -266,10 +266,18 @@ renderer.xr.setReferenceSpaceType('local-floor');
     rigRoot.traverse(function (o) {
       if (!o.isMesh) return;
       if (!o.userData.lokeOriginalVisibleSet) { o.userData.lokeOriginalVisible = o.visible; o.userData.lokeOriginalVisibleSet = true; }
+      o.visible = o.userData.lokeOriginalVisible;
       if (onlyArms) {
         var n = (o.name || '').toLowerCase();
-        o.visible = /^(arm_[lr]|arm_[lr]_outline|sleeve_[lr]|sleeve_[lr]_outline)$/.test(n);
-      } else o.visible = o.userData.lokeOriginalVisible;
+        var isArm = /^(arm_[lr]|arm_[lr]_outline|sleeve_[lr]|sleeve_[lr]_outline)$/.test(n);
+        // Full avatar remains available on layer 1 for camera/spectator views.
+        // The player's first-person XR view uses layer 0, so only the arms render there.
+        if (isArm) { o.layers.set(0); o.layers.enable(1); }
+        else { o.layers.set(1); }
+      } else {
+        o.layers.set(0);
+        o.layers.enable(1);
+      }
     });
   }
   function aimRigArmToController(side, controller) {
@@ -321,7 +329,7 @@ renderer.xr.setReferenceSpaceType('local-floor');
     var box = new THREE.Box3().setFromObject(rig);
     var size = new THREE.Vector3(); box.getSize(size);
     // Normalize in the rig's own space before parenting it to a moving/scaling player.
-    var scale = size.y > 0.001 ? 6.7 / size.y : 1;
+    var scale = size.y > 0.001 ? 3.35 / size.y : 1;
     rig.scale.setScalar(scale);
     rig.updateWorldMatrix(true, true);
     box.setFromObject(rig);
@@ -1018,7 +1026,7 @@ renderer.xr.setReferenceSpaceType('local-floor');
     rig.add(c);
     return c;
   });
-  var vr = { active: false, fx: 0, fz: 1, mx: 0, mz: 0, leanMove: 0, scale: 2.2, calib: false, turnLatch: false, jumpPrev: false, clickPrev: false, head: new THREE.Vector3(), headBase: new THREE.Vector3(), headBaseSet: false, headW: new THREE.Vector3(), headQ: new THREE.Quaternion() };
+  var vr = { active: false, fx: 0, fz: 1, mx: 0, mz: 0, leanMove: 0, scale: 1, calib: false, turnLatch: false, jumpPrev: false, clickPrev: false, head: new THREE.Vector3(), headBase: new THREE.Vector3(), headBaseSet: false, headW: new THREE.Vector3(), headQ: new THREE.Quaternion() };
   var EYE_H = 3.5, SNAP = Math.PI / 6, DOWN = new THREE.Vector3(0, -1, 0);
   var vq = new THREE.Quaternion(), vv = new THREE.Vector3(), vA = new THREE.Vector3(), vB = new THREE.Vector3();
 
@@ -1062,7 +1070,7 @@ renderer.xr.setReferenceSpaceType('local-floor');
     var fl = Math.hypot(vv.x, vv.z);
     if (fl > 0.25) { vr.fx = vv.x / fl; vr.fz = vv.z / fl; }
     yaw = Math.atan2(-vr.fx, -vr.fz);          // keyboard-style movement code then works off the headset
-    if (!vr.calib && vr.head.y > 0.5) { vr.scale = 2.2; vr.calib = true; toast('VR height locked', 900); }
+    if (!vr.calib && vr.head.y > 0.5) { vr.scale = clamp(EYE_H / vr.head.y, 1.2, 4); vr.calib = true; toast('Height set', 900); }
     rig.scale.setScalar(vr.scale);
   }
 
@@ -1091,9 +1099,10 @@ renderer.xr.setReferenceSpaceType('local-floor');
     arm.userData.el.rotation.y = arm.userData.bs * bend;
   }
 
-  // after the noob has been posed: put your head on his, hide it, point his arms at your hands
+  // after posing the noob: keep the first-person XR view to arms while preserving the full rig for camera views
   function vrPost() {
     headG.visible = false; torsoG.visible = false; legL.visible = false; legR.visible = false;
+    camera.layers.set(0); // first-person VR view: arms only
     setRigFirstPersonArms(true); // headset sees only the skinned arms and sleeves; world/camera remains unchanged
     noob.updateMatrixWorld(true);
     vA.set(vr.head.x * vr.scale, 0, vr.head.z * vr.scale).applyQuaternion(rig.quaternion);
@@ -1132,7 +1141,7 @@ renderer.xr.setReferenceSpaceType('local-floor');
     danceId = 0; vrBtn.textContent = 'Exit VR'; camRig.setActive(true);
   });
   renderer.xr.addEventListener('sessionend', function () {
-    vr.active = false; vr.headBaseSet = false; vr.leanMove = 0; RUN = 12; scene.add(camera); headG.visible = true; torsoG.visible = legL.visible = legR.visible = true; setRigFirstPersonArms(false);
+    vr.active = false; vr.headBaseSet = false; vr.leanMove = 0; RUN = 12; scene.add(camera); headG.visible = true; torsoG.visible = legL.visible = legR.visible = true; setRigFirstPersonArms(false); camera.layers.enable(1);
     rig.rotation.set(0, 0, 0); rig.scale.setScalar(1); camRig.setActive(false); vrBtn.textContent = 'Enter VR'; fit();
   });
 
