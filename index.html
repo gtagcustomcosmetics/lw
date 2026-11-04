@@ -37,7 +37,7 @@ button:hover,a.btn:hover{border-color:var(--cyan)}
 <script>
 const $=s=>document.querySelector(s),UI=4,AV=3;
 const setL=(o,l)=>o.traverse(c=>c.layers.set(l));
-const toast=m=>{const e=$('#toast');e.textContent=m;e.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove('show'),1500)};
+const toast=(m,ms=1500)=>{const e=$('#toast');e.textContent=m;e.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove('show'),ms)};
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x070914);
 const main=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.05,100);
 const rig=new THREE.Group();rig.position.set(0,0,2.6);scene.add(rig);rig.add(main);main.position.y=1.6;main.layers.enable(UI);
@@ -228,7 +228,7 @@ const makeCanvas=(w,h)=>{const c=document.createElement('canvas');c.width=w;c.he
     if (key !== faceKey) { faceKey = key; drawFace(); if (headTex) headTex.needsUpdate = true; }
   }
 function hookFace(root){root.traverse(o=>{if(!o.isMesh)return;[].concat(o.material).forEach(m=>{if(m.name==='head_tex'&&m.map){headTex=m.map;headTex.image=faceCv;headTex.generateMipmaps=false;headTex.minFilter=THREE.LinearFilter;headTex.needsUpdate=true;faceKey=''}})})}
-const FPSL=[24,30,60],RESL=[720,1080],BR=[8e6,14e6];
+const FPSL=[24,30,60],RESL=[720,1080],BR=[5e6,9e6];
 
 let vertical=true,fov=60,track=true,timer=0,micOn=false,rec=false,counting=false,micStream,mr,chunks=[],cd,gridOn=true,safeOn=false,ev=0,res=0,fpsI=1;
 function applyFormat(){const L=RESL[res],L2=Math.round(L*16/9),w=vertical?L:L2,h=vertical?L2:L,a=w/h;rr.setSize(w,h,false);rc.aspect=a;rc.fov=vertical?fov:2*Math.atan(Math.tan(fov*Math.PI/360)/a)*180/Math.PI;rc.fov=vertical?fov:rc.fov;rc.updateProjectionMatrix();
@@ -286,10 +286,13 @@ async function toggleMic(){if(micOn){stopMic();micOn=false;bMic.set('MIC OFF',36
 function toggleRec(){if(counting){clearInterval(cd);counting=false;bRec.set('● REC');return}if(rec){mr.stop();return}
  if(!window.MediaRecorder){toast('RECORDING NOT SUPPORTED HERE');return}
  if(!timer){startRec();return}let n=timer;counting=true;bRec.set(''+n,60);cd=setInterval(()=>{n--;if(n<=0){clearInterval(cd);counting=false;startRec()}else bRec.set(''+n,60)},1000)}
-async function startRec(){if(!micOn)await toggleMic();const cs=rr.domElement.captureStream(FPSL[fpsI]);if(micOn&&micStream)micStream.getAudioTracks().forEach(t=>cs.addTrack(t));
- const mime=['video/mp4;codecs=avc1','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'';
+let starting=false;
+async function startRec(){if(starting||rec)return;starting=true;try{if(!micOn)await toggleMic()}finally{starting=false}const cs=rr.domElement.captureStream(FPSL[fpsI]);if(micOn&&micStream)micStream.getAudioTracks().forEach(t=>cs.addTrack(t));
+ const mime=['video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/webm','video/mp4;codecs=avc1'].find(t=>MediaRecorder.isTypeSupported(t))||'';
  mr=new MediaRecorder(cs,mime?{mimeType:mime,videoBitsPerSecond:BR[res]}:{videoBitsPerSecond:BR[res]});chunks=[];mr.ondataavailable=e=>e.data.size&&chunks.push(e.data);
- mr.onstop=()=>{rec=false;bRec.set('● REC');const type=mr.mimeType||'video/webm',u=URL.createObjectURL(new Blob(chunks,{type})),n='oli-return-'+Date.now()+(type.includes('mp4')?'.mp4':'.webm');save(u,n);const a=$('#take');a.href=u;a.download=n;a.style.display='block';toast('TAKE SAVED')};
+ mr.onerror=e=>{console.error('REC ERROR',e);toast('REC ERROR: '+(e.error&&e.error.name||'unknown'))};
+ cs.getTracks().forEach(t=>t.onended=()=>console.warn('track ended while rec='+rec,t.kind));
+ mr.onstop=()=>{rec=false;bRec.set('● REC');const type=mr.mimeType||'video/webm',u=URL.createObjectURL(new Blob(chunks,{type})),n='oli-return-'+Date.now()+(type.includes('mp4')?'.mp4':'.webm');save(u,n);const a=$('#take');a.href=u;a.download=n;a.style.display='block';const secs=((performance.now()-recT0)/1000).toFixed(1),mb=(chunks.reduce((t,c)=>t+c.size,0)/1048576).toFixed(1);toast('SAVED '+secs+'s · '+mb+'MB · '+chunks.length+' chunks',3500)};
  recT0=performance.now();mr.start(1000);rec=true;bRec.set('■ STOP');toast('● RECORDING')}
 // input: VR controllers
 const ray=new THREE.Raycaster();ray.layers.set(UI);const ctrls=[],ptr={x:0,y:0,on:false};let grab=null;
