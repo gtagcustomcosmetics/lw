@@ -288,7 +288,7 @@ function toggleRec(){if(counting){clearInterval(cd);counting=false;bRec.set('●
  if(!timer){startRec();return}let n=timer;counting=true;bRec.set(''+n,60);cd=setInterval(()=>{n--;if(n<=0){clearInterval(cd);counting=false;startRec()}else bRec.set(''+n,60)},1000)}
 let starting=false;
 async function startRec(){if(starting||rec)return;starting=true;try{if(!micOn)await toggleMic()}finally{starting=false}const cs=rr.domElement.captureStream(FPSL[fpsI]);if(micOn&&micStream)micStream.getAudioTracks().forEach(t=>cs.addTrack(t));
- const mime=['video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/webm','video/mp4;codecs=avc1'].find(t=>MediaRecorder.isTypeSupported(t))||'';
+ const mime=['video/webm;codecs=vp9,opus','video/webm;codecs=h264,opus','video/mp4;codecs=avc1','video/webm;codecs=vp8,opus','video/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'';
  mr=new MediaRecorder(cs,mime?{mimeType:mime,videoBitsPerSecond:BR[res]}:{videoBitsPerSecond:BR[res]});chunks=[];mr.ondataavailable=e=>e.data.size&&chunks.push(e.data);
  mr.onerror=e=>{console.error('REC ERROR',e);toast('REC ERROR: '+(e.error&&e.error.name||'unknown'))};
  cs.getTracks().forEach(t=>t.onended=()=>console.warn('track ended while rec='+rec,t.kind));
