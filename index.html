@@ -31,7 +31,7 @@ button:hover,a.btn:hover{border-color:var(--cyan)}
 <div id="status">DESKTOP PREVIEW</div>
 <div class="top"><button id="vr">ENTER VR</button><a id="take" class="btn" href="#">SAVE LAST TAKE</a></div>
 <div id="toast"></div>
-<div class="pill">In VR you see only hand orbs; the camera sees your rig. Point a laser at the floating buttons and pull the trigger. Grab the camera body to move it, left stick to walk.<br>Desktop: drag to look · WASD move · click buttons · R record · P photo · V see your rig · H switch room</div>
+<div class="pill">In VR you see only hand orbs; the camera sees your rig. Point a laser at the floating buttons and pull the trigger. Grab the camera body to move it, left stick to walk.<br>Desktop: drag to look · WASD move · click buttons · R record · P photo · V see your rig · H switch room · G spectate myself</div>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js"></script>
 <script>
@@ -270,14 +270,19 @@ const HB={x0:-3.6,x1:3.6,z0:-2.1,z1:5.6};   // walk limits inside the house
 const house=new THREE.Group();house.visible=false;scene.add(house);
 (function(){
  let sd=7;const rn=()=>(sd=(sd*16807)%2147483647)/2147483647;
- const hm=(c,r=.85)=>new THREE.MeshStandardMaterial({color:c,emissive:c,emissiveIntensity:.3,roughness:r,metalness:0});
- const bx=(w,h,d,x,y,z,c)=>mesh(house,new THREE.BoxGeometry(w,h,d),hm(c),[x,y,z]);
+ // perf: all boxes get merged into ONE mesh, materials are cheap + shared (the headset flickered black when this was ~150 separate meshes)
+ const lit=m=>{m.onBeforeCompile=sh=>{sh.fragmentShader=sh.fragmentShader.replace('#include <emissivemap_fragment>','#include <emissivemap_fragment>\n totalEmissiveRadiance+=diffuseColor.rgb*.3;')};return m};
+ const HMC={},hm=c=>HMC[c]||(HMC[c]=lit(new THREE.MeshLambertMaterial({color:c})));
+ const MP=[],MN=[],MC=[],MI=[];let MO=0;const _c=new THREE.Color();
+ const bx=(w,h,d,x,y,z,c)=>{const g=new THREE.BoxGeometry(w,h,d);g.translate(x,y,z);const p=g.attributes.position,n=g.attributes.normal;_c.set(c);
+  for(let i=0;i<p.count;i++){MP.push(p.getX(i),p.getY(i),p.getZ(i));MN.push(n.getX(i),n.getY(i),n.getZ(i));MC.push(_c.r,_c.g,_c.b)}
+  g.index.array.forEach(i=>MI.push(i+MO));MO+=p.count;g.dispose()};
  const glow=(w,h,x,y,z,ry,c)=>{const m=mesh(house,new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({color:c,side:THREE.DoubleSide}),[x,y,z]);m.rotation.y=ry;return m};
  // floor planks + ceiling
  const fc=makeCanvas(256,256),fx=fc.getContext('2d');fx.fillStyle='#9a6b43';fx.fillRect(0,0,256,256);
  for(let i=0;i<4;i++){fx.fillStyle=i%2?'#8c5f3a':'#a8754b';fx.fillRect(i*64,0,62,256);fx.fillStyle='#6d4629';fx.fillRect(i*64+62,0,2,256)}
  const ft=new THREE.CanvasTexture(fc);ft.encoding=THREE.sRGBEncoding;ft.wrapS=ft.wrapT=THREE.RepeatWrapping;ft.repeat.set(4,4.5);
- const fl=mesh(house,new THREE.PlaneGeometry(8,9),new THREE.MeshStandardMaterial({map:ft,emissive:0xffffff,emissiveMap:ft,emissiveIntensity:.3,roughness:.7}),[0,0,2]);fl.rotation.x=-Math.PI/2;
+ const fl=mesh(house,new THREE.PlaneGeometry(8,9),lit(new THREE.MeshLambertMaterial({map:ft})),[0,0,2]);fl.rotation.x=-Math.PI/2;
  const ce=mesh(house,new THREE.PlaneGeometry(8,9),hm(0xf4efe6),[0,2.8,2]);ce.rotation.x=Math.PI/2;
  // walls (back wall is the blue accent wall behind your avatar)
  bx(8.2,2.8,.1,0,1.4,6.55,0x8fa6b8);bx(8.2,2.8,.1,0,1.4,-2.55,0xe9dfcc);bx(.1,2.8,9.2,-4.05,1.4,2,0xe9dfcc);bx(.1,2.8,9.2,4.05,1.4,2,0xe9dfcc);
@@ -305,11 +310,18 @@ const house=new THREE.Group();house.visible=false;scene.add(house);
  bx(.04,1.5,.04,-3.7,.75,4.7,0x222222);mesh(house,new THREE.CylinderGeometry(.2,.2,.03,16),hm(0x222222),[-3.7,.02,4.7]);
  mesh(house,new THREE.CylinderGeometry(.16,.26,.3,16,1,true),new THREE.MeshBasicMaterial({color:0xffd79a,side:THREE.DoubleSide}),[-3.7,1.6,4.7]);
  mesh(house,new THREE.CylinderGeometry(.4,.4,.05,24),new THREE.MeshBasicMaterial({color:0xfff6dd}),[0,2.77,3]);
- const l1=new THREE.PointLight(0xfff1dc,40,14);l1.position.set(0,2.5,3.2);house.add(l1);
- const l2=new THREE.PointLight(0xffc880,18,8);l2.position.set(-3.5,1.5,4.7);house.add(l2);
+ const l1=new THREE.PointLight(0xfff1dc,60,14);l1.position.set(0,2.5,3.2);house.add(l1);
+ const mg=new THREE.BufferGeometry();mg.setAttribute('position',new THREE.Float32BufferAttribute(MP,3));mg.setAttribute('normal',new THREE.Float32BufferAttribute(MN,3));mg.setAttribute('color',new THREE.Float32BufferAttribute(MC,3));mg.setIndex(MI);
+ house.add(new THREE.Mesh(mg,lit(new THREE.MeshLambertMaterial({vertexColors:true}))));
 })();
-function setRoom(i){room=i;house.visible=i===1;grid.visible=i===0;bRoom.set('ROOM: '+ROOMS[i],30);toast('ROOM: '+ROOMS[i])}
+function setRoom(i){room=i;house.visible=i===1;key.visible=i===0;grid.visible=i===0;bRoom.set('ROOM: '+ROOMS[i],30);toast('ROOM: '+ROOMS[i])}
 const bRoom=mkBtn('ROOM: VOID',0,6,0xffe66d,()=>setRoom((room+1)%ROOMS.length));bRoom.set('ROOM: VOID',30);
+// ===== SPECTATE MYSELF: your headset shows ONLY the recording camera's view (so BeamXR streams that shot). VR: right B toggles. Desktop: G, tap screen to exit =====
+const SP=5;let spec=false,specMask=0,specPrev=false;
+const specMat=new THREE.MeshBasicMaterial({color:0xffffff});
+const specPlane=new THREE.Mesh(new THREE.PlaneGeometry(1,1),specMat);specPlane.position.set(0,0,-1);specPlane.layers.set(SP);specPlane.visible=false;main.add(specPlane);
+function setSpec(on){if(on===spec)return;spec=on;specPlane.visible=on;if(on){specMask=main.layers.mask;main.layers.set(SP)}else main.layers.mask=specMask;bSpec.set(on?'SPECTATE ON':'SPECTATE',on?26:30);toast(on?'SPECTATE ON — B (VR) or G / tap to exit':'SPECTATE OFF',2500)}
+const bSpec=mkBtn('SPECTATE',1,6,0x53f5ff,()=>setSpec(!spec));bSpec.set('SPECTATE',30);
 function ovl(){if(!screen)return;const w=screen.geometry.parameters.width,h=screen.geometry.parameters.height,p=[];const Ln=(a,b,c,d)=>p.push(a,b,.003,c,d,.003);
  if(gridOn)for(const k of[-1,1]){Ln(k*w/6,-h/2,k*w/6,h/2);Ln(-w/2,k*h/6,w/2,k*h/6)}
  if(safeOn){const x=w*.45,y=h*.45;Ln(-x,-y,x,-y);Ln(x,-y,x,y);Ln(x,y,-x,y);Ln(-x,y,-x,-y)}
@@ -376,7 +388,7 @@ const press=b=>{b.press=1;b.fn()};
 for(let i=0;i<2;i++){const c=renderer.xr.getController(i);rig.add(c);
  const m=new THREE.MeshBasicMaterial({color:i?0xff4eb8:0x53f5ff,transparent:true,opacity:.85});
  const beam=mesh(c,new THREE.CylinderGeometry(.004,.008,1,6),m);beam.rotation.x=-Math.PI/2;const tip=mesh(c,new THREE.SphereGeometry(.02,10,8),m);setL(c,UI);c.userData={beam,tip,hand:i?'right':'left'};c.addEventListener('connected',ev=>{if(ev.data&&ev.data.handedness)c.userData.hand=ev.data.handedness});
- c.addEventListener('selectstart',ev=>{const h=rayOf(c);if(!h)return;const b=h.object.userData.btn;if(b){press(b);try{ev.data.gamepad.hapticActuators[0].pulse(.6,40)}catch(e){}}else grab={c,d:h.distance}});
+ c.addEventListener('selectstart',ev=>{if(spec)return;const h=rayOf(c);if(!h)return;const b=h.object.userData.btn;if(b){press(b);try{ev.data.gamepad.hapticActuators[0].pulse(.6,40)}catch(e){}}else grab={c,d:h.distance}});
  c.addEventListener('selectend',()=>{if(grab&&grab.c===c)grab=null});ctrls.push(c)}
 $('#vr').onclick=async()=>{if(!navigator.xr){toast('WEBXR NOT AVAILABLE — USE DESKTOP PREVIEW');return}
  try{const s=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor']});await renderer.xr.setSession(s)}catch(e){toast('NO VR HEADSET FOUND — DESKTOP PREVIEW')}};
@@ -385,8 +397,8 @@ if(navigator.xr)navigator.xr.isSessionSupported('immersive-vr').then(ok=>{if(!ok
 let yaw=0,pitch=0,drag=false,moved=0,lx=0,ly=0;const keys={};const cv=renderer.domElement;
 cv.addEventListener('pointerdown',e=>{drag=true;moved=0;lx=e.clientX;ly=e.clientY;cv.setPointerCapture(e.pointerId)});
 cv.addEventListener('pointermove',e=>{ptr.on=true;ptr.x=e.clientX/innerWidth*2-1;ptr.y=-(e.clientY/innerHeight)*2+1;if(!drag||renderer.xr.isPresenting)return;moved+=Math.abs(e.clientX-lx)+Math.abs(e.clientY-ly);yaw-=(e.clientX-lx)*.004;pitch=Math.max(-1.3,Math.min(1.3,pitch-(e.clientY-ly)*.004));lx=e.clientX;ly=e.clientY;main.rotation.set(pitch,yaw,0,'YXZ')});
-cv.addEventListener('pointerup',()=>{drag=false;if(moved<6&&!renderer.xr.isPresenting){ray.setFromCamera(ptr,main);const h=ray.intersectObjects(pickList)[0];if(h&&h.object.userData.btn)press(h.object.userData.btn)}});
-addEventListener('keydown',e=>{const k=e.key.toLowerCase();keys[k]=true;if(k==='r')toggleRec();if(k==='p')photo();if(k==='v')main.layers.toggle(AV);if(k==='h')setRoom((room+1)%ROOMS.length)});addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+cv.addEventListener('pointerup',()=>{drag=false;if(spec&&moved<6&&!renderer.xr.isPresenting){setSpec(false);return}if(moved<6&&!renderer.xr.isPresenting){ray.setFromCamera(ptr,main);const h=ray.intersectObjects(pickList)[0];if(h&&h.object.userData.btn)press(h.object.userData.btn)}});
+addEventListener('keydown',e=>{const k=e.key.toLowerCase();keys[k]=true;if(k==='r')toggleRec();if(k==='p')photo();if(k==='v')main.layers.toggle(AV);if(k==='h')setRoom((room+1)%ROOMS.length);if(k==='g')setSpec(!spec)});addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
 addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);main.aspect=innerWidth/innerHeight;main.updateProjectionMatrix()});
 // loop
 const hp=new THREE.Vector3(),hq=new THREE.Quaternion(),eu=new THREE.Euler(),aim=new THREE.Vector3(0,1.3,2.6),tmp=new THREE.Vector3();let frame=0,prev=0,lastSt='';
@@ -397,6 +409,7 @@ renderer.setAnimationLoop(time=>{const dt=Math.min((time-prev)/1000,.05)||0,t=ti
  if(xr){const s=renderer.xr.getSession();if(s)for(const src of s.inputSources){const g=src.gamepad;if(g&&src.handedness==='left'&&g.axes.length>3){const x=g.axes[2],y=g.axes[3];if(Math.abs(x)>.15||Math.abs(y)>.15){rig.position.x+=(fx*-y-fz*x)*dt*2;rig.position.z+=(fz*-y+fx*x)*dt*2}}}}
  else{const f=(keys.w||keys.arrowup?1:0)-(keys.s||keys.arrowdown?1:0),s=(keys.d||keys.arrowright?1:0)-(keys.a||keys.arrowleft?1:0);rig.position.x+=(fx*f-fz*s)*dt*2.5;rig.position.z+=(fz*f+fx*s)*dt*2.5}
   if(room===1){rig.position.x=THREE.MathUtils.clamp(rig.position.x,HB.x0,HB.x1);rig.position.z=THREE.MathUtils.clamp(rig.position.z,HB.z0,HB.z1)}
+  if(xr){const s2=renderer.xr.getSession();if(s2)for(const src of s2.inputSources){const g=src.gamepad;if(g&&src.handedness==='right'&&g.buttons.length>5){const b=g.buttons[5].pressed;if(b&&!specPrev)setSpec(!spec);specPrev=b}}}
  // avatar
  hands.forEach((h,i)=>{if(xr){ctrls[i].getWorldPosition(h.position)}else{const sd=i?1:-1;h.position.set(hp.x+Math.cos(hy)*.3*sd+fx*.35,hp.y-.55+Math.sin(t*2+i)*.02,hp.z-Math.sin(hy)*.3*sd+fz*.35)}});
  poseNoob(dt,hp,hq,hy);
@@ -410,10 +423,11 @@ renderer.setAnimationLoop(time=>{const dt=Math.min((time-prev)/1000,.05)||0,t=ti
  let hover=null;if(xr){ctrls.forEach(c=>{const h=rayOf(c),len=h?h.distance:2.5;c.userData.beam.scale.y=len;c.userData.beam.position.z=-len/2;c.userData.tip.position.z=-len;if(h&&h.object.userData.btn)hover=h.object.userData.btn})}
  else if(ptr.on&&!drag){ray.setFromCamera(ptr,main);const h=ray.intersectObjects(pickList)[0];if(h&&h.object.userData.btn)hover=h.object.userData.btn}
  btns.forEach((b,i)=>{b.press=Math.max(0,b.press-dt*4);b.plate.material.color.set(b===hover?0x2b3d6e:0x141a30);b.g.scale.setScalar(1+.14*b.press+(b===hover?.06:0));b.g.position.z=Math.sin(t*1.5+i)*.01});
- if(rec||frame%3==0)renderRec();
+ if(spec){const a=rc.aspect,H=Math.min(1.6,2/a);specPlane.scale.set(H*a,H,1);if(specMat.map!==monTex){specMat.map=monTex;specMat.needsUpdate=true}}
+  if(rec||spec||frame%(xr?4:3)==0)renderRec();
  const st=xr?'VR ACTIVE · LASERS ONLINE':rec?'● RECORDING · '+(vertical?'9:16':'16:9'):'DESKTOP PREVIEW · '+(vertical?'9:16 VERTICAL':'16:9 WIDE');if(st!==lastSt){$('#status').textContent=st;lastSt=st}
  // three r147's VR eye cameras only draw layers 0/1/2 and ignore main.layers, so the UI layer must be enabled on them or VR renders nothing
- if(xr){const xc=renderer.xr.getCamera();xc.layers.enable(UI);xc.cameras.forEach(c=>c.layers.enable(UI))}
+ if(xr&&!spec){const xc=renderer.xr.getCamera();xc.layers.enable(UI);xc.cameras.forEach(c=>c.layers.enable(UI))}
  renderer.render(scene,main)});
 </script>
 </body>
