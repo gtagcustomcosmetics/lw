@@ -31,7 +31,7 @@ button:hover,a.btn:hover{border-color:var(--cyan)}
 <div id="status">DESKTOP PREVIEW</div>
 <div class="top"><button id="vr">ENTER VR</button><a id="take" class="btn" href="#">SAVE LAST TAKE</a></div>
 <div id="toast"></div>
-<div class="pill">In VR you see only hand orbs; the camera sees your rig. Point a laser at the floating buttons and pull the trigger. Grab the camera body to move it, left stick to walk.<br>Desktop: drag to look · WASD move · click buttons · R record · P photo · V see your rig</div>
+<div class="pill">In VR you see only hand orbs; the camera sees your rig. Point a laser at the floating buttons and pull the trigger. Grab the camera body to move it, left stick to walk.<br>Desktop: drag to look · WASD move · click buttons · R record · P photo · V see your rig · H switch room</div>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js"></script>
 <script>
@@ -264,6 +264,52 @@ mkBtn('EV +',2,4,0xffe66d,()=>{ev=Math.min(2,ev+.5);rr.toneMappingExposure=Math.
 const bFps=mkBtn('30 FPS',0,5,0xffe66d,()=>{fpsI=(fpsI+1)%3;bFps.set(FPSL[fpsI]+' FPS',36);info()});
 const bRes=mkBtn('720p',1,5,0xffe66d,()=>{if(rec)return toast('STOP REC TO CHANGE RES');res=(res+1)%2;bRes.set(RESL[res]+'p',36);applyFormat()});
 mkBtn('EV −',2,5,0xffe66d,()=>{ev=Math.max(-2,ev-.5);rr.toneMappingExposure=Math.pow(2,ev);info()});
+// ===== ROOMS: VOID / HOUSE. Press the ROOM button (or H on desktop). Add a room: add a name here + a group below =====
+const ROOMS=['VOID','HOUSE'];let room=0;
+const HB={x0:-3.6,x1:3.6,z0:-2.1,z1:5.6};   // walk limits inside the house
+const house=new THREE.Group();house.visible=false;scene.add(house);
+(function(){
+ let sd=7;const rn=()=>(sd=(sd*16807)%2147483647)/2147483647;
+ const hm=(c,r=.85)=>new THREE.MeshStandardMaterial({color:c,emissive:c,emissiveIntensity:.3,roughness:r,metalness:0});
+ const bx=(w,h,d,x,y,z,c)=>mesh(house,new THREE.BoxGeometry(w,h,d),hm(c),[x,y,z]);
+ const glow=(w,h,x,y,z,ry,c)=>{const m=mesh(house,new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({color:c,side:THREE.DoubleSide}),[x,y,z]);m.rotation.y=ry;return m};
+ // floor planks + ceiling
+ const fc=makeCanvas(256,256),fx=fc.getContext('2d');fx.fillStyle='#9a6b43';fx.fillRect(0,0,256,256);
+ for(let i=0;i<4;i++){fx.fillStyle=i%2?'#8c5f3a':'#a8754b';fx.fillRect(i*64,0,62,256);fx.fillStyle='#6d4629';fx.fillRect(i*64+62,0,2,256)}
+ const ft=new THREE.CanvasTexture(fc);ft.encoding=THREE.sRGBEncoding;ft.wrapS=ft.wrapT=THREE.RepeatWrapping;ft.repeat.set(4,4.5);
+ const fl=mesh(house,new THREE.PlaneGeometry(8,9),new THREE.MeshStandardMaterial({map:ft,emissive:0xffffff,emissiveMap:ft,emissiveIntensity:.3,roughness:.7}),[0,0,2]);fl.rotation.x=-Math.PI/2;
+ const ce=mesh(house,new THREE.PlaneGeometry(8,9),hm(0xf4efe6),[0,2.8,2]);ce.rotation.x=Math.PI/2;
+ // walls (back wall is the blue accent wall behind your avatar)
+ bx(8.2,2.8,.1,0,1.4,6.55,0x8fa6b8);bx(8.2,2.8,.1,0,1.4,-2.55,0xe9dfcc);bx(.1,2.8,9.2,-4.05,1.4,2,0xe9dfcc);bx(.1,2.8,9.2,4.05,1.4,2,0xe9dfcc);
+ bx(8,.12,.03,0,.06,6.485,0xffffff);bx(8,.12,.03,0,.06,-2.485,0xffffff);bx(.03,.12,9,-3.985,.06,2,0xffffff);bx(.03,.12,9,3.985,.06,2,0xffffff);
+ // windows (left wall) + door (right wall)
+ [.8,3.8].forEach(z=>{bx(.04,1.32,1.72,-3.97,1.55,z,0xffffff);glow(1.6,1.2,-3.945,1.55,z,Math.PI/2,0xbfe6ff);bx(.03,1.2,.04,-3.94,1.55,z,0xffffff);bx(.03,.04,1.6,-3.94,1.55,z,0xffffff)});
+ bx(.1,2.2,1.1,3.97,1.1,.8,0xffffff);bx(.05,2.1,.95,3.93,1.05,.8,0x7a4b2a);mesh(house,new THREE.SphereGeometry(.04,10,8),hm(0xd9b45a),[3.89,1,.45]);
+ // TV + console
+ bx(2.8,.5,.5,2,.25,6.2,0x4a3524);bx(2.2,1.25,.06,2,1.5,6.43,0x0a0c12);glow(2.08,1.13,2,1.5,6.395,Math.PI,0x1b3f78);
+ // sofa, coffee table, rug
+ bx(3.2,.4,1,-1.9,.2,5.8,0x4b5f8a);bx(3.2,.7,.25,-1.9,.75,6.18,0x4b5f8a);bx(.25,.6,1,-3.4,.5,5.8,0x425579);bx(.25,.6,1,-.4,.5,5.8,0x425579);bx(1.3,.15,.8,-2.55,.47,5.75,0x5c72a0);bx(1.3,.15,.8,-1.25,.47,5.75,0x5c72a0);
+ bx(1.3,.06,.7,-1.9,.42,4.5,0x5a3b24);[[-.6,-.3],[.6,-.3],[-.6,.3],[.6,.3]].forEach(p=>bx(.06,.4,.06,-1.9+p[0],.2,4.5+p[1],0x3d2817));
+ const rug=mesh(house,new THREE.PlaneGeometry(4.4,3),hm(0x7b3f4f),[-1,.012,4.3]);rug.rotation.x=-Math.PI/2;
+ // pictures above the sofa
+ [0xe8554a,0xf2c94c,0x4b8be8].forEach((c,i)=>{const x=-3.2+i*1.3;bx(.9,.65,.03,x,1.75,6.47,0xffffff);bx(.78,.53,.035,x,1.75,6.465,c)});
+ // bookshelf (right wall) with random books
+ const BZ=4.4,BC=[0xe8554a,0xf2c94c,0x4b8be8,0x7dd17a,0xc76be8,0xff9a3c,0x3ad1d6];
+ bx(.4,2,.04,3.78,1,BZ-.8,0x6b4a2f);bx(.4,2,.04,3.78,1,BZ+.8,0x6b4a2f);bx(.02,2,1.6,3.97,1,BZ,0x5a3b24);
+ for(let i=0;i<5;i++){const y=.02+i*.45;bx(.4,.04,1.6,3.78,y,BZ,0x6b4a2f);
+  if(i<4)for(let z=BZ-.72;z<BZ+.7;z+=.1){const h=.25+rn()*.13;bx(.22,h,.08,3.78,y+.02+h/2,z,BC[Math.floor(rn()*BC.length)])}}
+ // plant, beanbag, floor lamp, ceiling lamp
+ mesh(house,new THREE.CylinderGeometry(.22,.17,.4,16),hm(0xb5653a),[3.3,.2,5.9]);
+ [[.3,.85],[.24,1.1],[.2,1.3]].forEach(p=>mesh(house,new THREE.SphereGeometry(p[0],12,10),hm(0x3f9c4a),[3.3,p[1],5.9]));
+ mesh(house,new THREE.SphereGeometry(.5,16,12),hm(0xe8554a),[2.7,.3,2.4],[1,.65,1]);
+ bx(.04,1.5,.04,-3.7,.75,4.7,0x222222);mesh(house,new THREE.CylinderGeometry(.2,.2,.03,16),hm(0x222222),[-3.7,.02,4.7]);
+ mesh(house,new THREE.CylinderGeometry(.16,.26,.3,16,1,true),new THREE.MeshBasicMaterial({color:0xffd79a,side:THREE.DoubleSide}),[-3.7,1.6,4.7]);
+ mesh(house,new THREE.CylinderGeometry(.4,.4,.05,24),new THREE.MeshBasicMaterial({color:0xfff6dd}),[0,2.77,3]);
+ const l1=new THREE.PointLight(0xfff1dc,40,14);l1.position.set(0,2.5,3.2);house.add(l1);
+ const l2=new THREE.PointLight(0xffc880,18,8);l2.position.set(-3.5,1.5,4.7);house.add(l2);
+})();
+function setRoom(i){room=i;house.visible=i===1;grid.visible=i===0;bRoom.set('ROOM: '+ROOMS[i],30);toast('ROOM: '+ROOMS[i])}
+const bRoom=mkBtn('ROOM: VOID',0,6,0xffe66d,()=>setRoom((room+1)%ROOMS.length));bRoom.set('ROOM: VOID',30);
 function ovl(){if(!screen)return;const w=screen.geometry.parameters.width,h=screen.geometry.parameters.height,p=[];const Ln=(a,b,c,d)=>p.push(a,b,.003,c,d,.003);
  if(gridOn)for(const k of[-1,1]){Ln(k*w/6,-h/2,k*w/6,h/2);Ln(-w/2,k*h/6,w/2,k*h/6)}
  if(safeOn){const x=w*.45,y=h*.45;Ln(-x,-y,x,-y);Ln(x,-y,x,y);Ln(x,y,-x,y);Ln(-x,y,-x,-y)}
@@ -340,7 +386,7 @@ let yaw=0,pitch=0,drag=false,moved=0,lx=0,ly=0;const keys={};const cv=renderer.d
 cv.addEventListener('pointerdown',e=>{drag=true;moved=0;lx=e.clientX;ly=e.clientY;cv.setPointerCapture(e.pointerId)});
 cv.addEventListener('pointermove',e=>{ptr.on=true;ptr.x=e.clientX/innerWidth*2-1;ptr.y=-(e.clientY/innerHeight)*2+1;if(!drag||renderer.xr.isPresenting)return;moved+=Math.abs(e.clientX-lx)+Math.abs(e.clientY-ly);yaw-=(e.clientX-lx)*.004;pitch=Math.max(-1.3,Math.min(1.3,pitch-(e.clientY-ly)*.004));lx=e.clientX;ly=e.clientY;main.rotation.set(pitch,yaw,0,'YXZ')});
 cv.addEventListener('pointerup',()=>{drag=false;if(moved<6&&!renderer.xr.isPresenting){ray.setFromCamera(ptr,main);const h=ray.intersectObjects(pickList)[0];if(h&&h.object.userData.btn)press(h.object.userData.btn)}});
-addEventListener('keydown',e=>{const k=e.key.toLowerCase();keys[k]=true;if(k==='r')toggleRec();if(k==='p')photo();if(k==='v')main.layers.toggle(AV)});addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+addEventListener('keydown',e=>{const k=e.key.toLowerCase();keys[k]=true;if(k==='r')toggleRec();if(k==='p')photo();if(k==='v')main.layers.toggle(AV);if(k==='h')setRoom((room+1)%ROOMS.length)});addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
 addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);main.aspect=innerWidth/innerHeight;main.updateProjectionMatrix()});
 // loop
 const hp=new THREE.Vector3(),hq=new THREE.Quaternion(),eu=new THREE.Euler(),aim=new THREE.Vector3(0,1.3,2.6),tmp=new THREE.Vector3();let frame=0,prev=0,lastSt='';
@@ -350,11 +396,13 @@ renderer.setAnimationLoop(time=>{const dt=Math.min((time-prev)/1000,.05)||0,t=ti
  if(!xr)main.position.z=main.layers.isEnabled(AV)?2.2:0;main.updateMatrixWorld(true);main.getWorldQuaternion(hq);if(xr)main.getWorldPosition(hp);else hp.set(rig.position.x,1.6,rig.position.z);const hy=eu.setFromQuaternion(hq,'YXZ').y,fx=-Math.sin(hy),fz=-Math.cos(hy);
  if(xr){const s=renderer.xr.getSession();if(s)for(const src of s.inputSources){const g=src.gamepad;if(g&&src.handedness==='left'&&g.axes.length>3){const x=g.axes[2],y=g.axes[3];if(Math.abs(x)>.15||Math.abs(y)>.15){rig.position.x+=(fx*-y-fz*x)*dt*2;rig.position.z+=(fz*-y+fx*x)*dt*2}}}}
  else{const f=(keys.w||keys.arrowup?1:0)-(keys.s||keys.arrowdown?1:0),s=(keys.d||keys.arrowright?1:0)-(keys.a||keys.arrowleft?1:0);rig.position.x+=(fx*f-fz*s)*dt*2.5;rig.position.z+=(fz*f+fx*s)*dt*2.5}
+  if(room===1){rig.position.x=THREE.MathUtils.clamp(rig.position.x,HB.x0,HB.x1);rig.position.z=THREE.MathUtils.clamp(rig.position.z,HB.z0,HB.z1)}
  // avatar
  hands.forEach((h,i)=>{if(xr){ctrls[i].getWorldPosition(h.position)}else{const sd=i?1:-1;h.position.set(hp.x+Math.cos(hy)*.3*sd+fx*.35,hp.y-.55+Math.sin(t*2+i)*.02,hp.z-Math.sin(hy)*.3*sd+fz*.35)}});
  poseNoob(dt,hp,hq,hy);
  // camera: grab, track, tripod
  if(grab){grab.c.getWorldPosition(_o);grab.c.getWorldQuaternion(_q);_d.set(0,0,-1).applyQuaternion(_q);cg.position.copy(_o).addScaledVector(_d,grab.d);cg.position.y=Math.max(.5,Math.min(2.4,cg.position.y))}
+  if(room===1){cg.position.x=THREE.MathUtils.clamp(cg.position.x,-3.8,3.8);cg.position.z=THREE.MathUtils.clamp(cg.position.z,-2.3,6.2)}
  if(track){aim.lerp(tmp.set(hp.x,hp.y-.55,hp.z),.08);cg.lookAt(aim)}
  col.position.set(cg.position.x,cg.position.y/2,cg.position.z);col.scale.y=cg.position.y;base.position.set(cg.position.x,.01,cg.position.z);
  recLed.visible=rec&&Math.floor(t*2)%2==0;
