@@ -85,9 +85,9 @@ function walkPose(dt,hp,hy){const b=bones;if(!b.hips)return;
  const ln=.05*a*Math.max(0,Math.min(1,wFw/1.5)),br=.012*Math.sin(performance.now()/625)*(1-w);
  R('hips',0,-.07*a*sn,.03*a*cs);R('spine',ln*.6,.05*a*sn,-.015*a*cs);R('chest',ln*.4+br,.09*a*sn,-.02*a*cs);
  b.hips.position.y=RS._hy-.022*a*Math.cos(2*wPh)}
-function poseNoob(dt,hp,hq,hy){if(!rigOK)return;if(hp.y>1.1)nS+=(THREE.MathUtils.clamp(hp.y/1.34*SMALL,.5,1.5)-nS)*Math.min(1,dt*2);
+function poseNoob(dt,hp,hq,hy){if(!rigOK)return;if(hp.y>.7)nS+=(THREE.MathUtils.clamp(hp.y/1.34*SMALL,.5,1.5)-nS)*Math.min(1,dt*2);
  if(byaw===null)byaw=hy;const dy=((hy-byaw+Math.PI*3)%(Math.PI*2))-Math.PI;byaw+=dy*Math.min(1,dt*4);
- noob.scale.setScalar(nS);noob.position.set(hp.x,Math.max(-.6,hp.y-1.34*nS),hp.z);noob.rotation.y=byaw+Math.PI;noob.updateMatrixWorld(true);
+ noob.scale.setScalar(nS);noob.position.set(hp.x,Math.max(0,hp.y-1.34*nS),hp.z);noob.rotation.y=byaw+Math.PI;noob.updateMatrixWorld(true);
  walkPose(dt,hp,hy);const nk=bones.neck,hd=nk&&nk.children.find(c=>c.isBone);if(hd){qb.copy(hq).multiply(qFlip);nk.parent.getWorldQuaternion(qa);qa.invert().multiply(qb);nk.quaternion.identity().slerp(qa,.35);nk.updateWorldMatrix(true,false);nk.getWorldQuaternion(qa);hd.quaternion.copy(qa.invert()).multiply(qb)}
  for(let i=0;i<2;i++){const xr=renderer.xr.isPresenting,side=xr?(ctrls[i].userData.hand==='left'?'L':'R'):(i?'R':'L');
   if(xr)ik(side,hands[i].position);else{const S=bones['upperArm_'+side].getWorldPosition(V3());noob.getWorldQuaternion(qa);const T=S.add(V3().set(side==='L'?.14*nS:-.14*nS,-2,0).applyQuaternion(qa));hands[i].position.copy(ik(side,T))}}}
@@ -427,7 +427,7 @@ renderer.setAnimationLoop(time=>{const dt=Math.min((time-prev)/1000,.05)||0,t=ti
   if(rec||spec||frame%(xr?4:3)==0)renderRec();
  const st=xr?'VR ACTIVE · LASERS ONLINE':rec?'● RECORDING · '+(vertical?'9:16':'16:9'):'DESKTOP PREVIEW · '+(vertical?'9:16 VERTICAL':'16:9 WIDE');if(st!==lastSt){$('#status').textContent=st;lastSt=st}
  // three r147's VR eye cameras only draw layers 0/1/2 and ignore main.layers, so the UI layer must be enabled on them or VR renders nothing
- if(xr&&!spec){const xc=renderer.xr.getCamera();xc.layers.enable(UI);xc.cameras.forEach(c=>c.layers.enable(UI))}
+ if(xr){const xc=renderer.xr.getCamera();[xc,...xc.cameras].forEach(c=>{if(spec)c.layers.set(SP);else{c.layers.enable(0);c.layers.enable(UI)}})}
  renderer.render(scene,main)});
 </script>
 </body>
